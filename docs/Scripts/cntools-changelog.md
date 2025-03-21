@@ -6,6 +6,163 @@ All notable changes to this tool will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [13.4.0] - 2025-03-09
+#### Added
+- Support was added for the pool Calidus key according to CIP-88 standard.
+#### Changed
+- Governance proposal list was updated to be more performant by only loading and processing data as you navigate.
+#### Fixed
+- Fix for kesExpiration helper function
+
+## [13.3.3] - 2025-01-10
+#### Fixed
+- Drop deprecated refences to `${NETWORK_ERA}`
+
+## [13.3.2] - 2025-01-09
+#### Fixed
+- Corrected predefined Drep wallet data querying in light (api) mode - should address StringToDecodeMissingSeparatorChar errors
+
+## [13.3.1] - 2024-11-25
+#### Fixed
+- Corrected KES expiration information calculation on cntools launch, pool -> list and pool -> show screens
+
+## [13.3.0] - 2024-11-21
+#### Added
+- Own votes cast (SPO|DRep|CC) shown in proposal list.
+#### Changed
+- Protocol version 10 check on withdrawal if not vote delegated to show informative error if needed.
+- Only transform transaction for HW when a HW wallet is used as source.
+- Remove deprecated CIP-0094 vote command from CNTools pool menu.
+- Adoptions for Koios v1.3.0 queries (DRep status)
+#### Fixed
+- Wallet DRep delegation status to pre-defined types
+- Proposal list vote summary didn't show correct data for all types
+
+## [13.2.3] - 2024-10-16
+#### Fixed
+- Edge case fix for pool registration when cardano-hw-cli is present
+
+## [13.2.2] - 2024-09-23
+#### Fixed
+- URL for share.koios.rest to download catalyst-toolbox
+
+## [13.2.1] - 2024-09-10
+#### Added
+- Added gov vote validation for role and type
+- Gov proposal list now have additional vote data
+
+## [13.2.0] - 2024-09-08
+#### Added
+- `light` mode support for all governance functions.
+- CIP-129 support
+
+## [13.1.0] - 2024-08-01
+#### Added
+- New Vote menu option to hold everything related to voting on Cardano.
+  - Governance features according to CIP-1694 with Conway era.
+  - Catalyst vote registration.
+- MultiSig wallet support through advanced menu item.
+- Creation of new mnemonic(seed phrase) generated wallet.
+- Custom mnemonic derivation path on mnemonic/hardware import.
+- For a more in-depth list, see https://github.com/cardano-community/guild-operators/pull/1783
+#### Changed
+- Removed CIP-0095 SPO poll
+
+## [13.0.2] - 2024-06-07
+#### Fixed
+- Mnemonic import.
+
+## [13.0.0] - 2024-06-07
+#### Added
+- New light mode using Koios API instead of local node for blockchain queries. Mode can be selected at runtime using -l (light), -n (node, default) or -o (offline).
+#### Changed
+- Improved submission handling
+- Removed complicated file descriptor re-direction for logging. This simplified the code and improves screen printing speed as special hacks around FDs could be removed.
+#### Fixed
+- Update handling and reload of script.
+
+## [12.1.0] - 2024-01-19
+#### Changed
+- ADA price discovery through CoinGecko in set currency incl 24hr change. Shown in main UI, wallet list & show as well as pool show. Disabled by default.
+- Convert calculate-min-fee command references to function
+
+## [12.0.2] - 2024-02-11
+#### Fixed
+- Retiring pools should be modifiable in case the user wants to cancel the pending retirement.
+
+## [12.0.1] - 2024-01-26
+#### Fixed
+- Funds > Send had a regression introduced in 12.0.0 thats now fixed (thanks Homer :)
+
+## [12.0.0] - 2024-01-19
+#### Changed
+- Minimum version bumps
+  - node 8.7.3
+  - cardano-hw-cli 1.14.0
+  - Ledger 5.0.1
+  - Trezor 2.6.4
+- Send > Funds flow updated to ask for Ada amount after tokens and destination to be able to calculate minimum amount valid to send correctly.
+#### Fixed
+- Minimum utxo calculation changed to use cardano-cli calculation tool (was broken)
+
+## [11.0.2] - 2023-10-30
+#### Fixed
+- Fix additional Ada printing. Now omits trailing zeros from fraction part of Ada output.
+
+## [11.0.1] - 2023-10-25
+#### Fixed
+- Fix display for Pool Cost and Pledge to accept integer as well as decimal format of ADA
+
+## [11.0.0] - 2023-07-05
+#### Changed
+- CNTools now part of Koios brand
+
+## [10.4.0] - 2023-06-19
+#### Added
+- Support for SRV records
+- Support for cardano-node 8.1.1
+
+## [10.3.1] - 2023-06-03
+#### Fixed
+- Backup didn't properly exclude private keys
+
+## [10.3.0] - 2023-05-18
+### Added
+- Support for voting as per [CIP-0094](https://github.com/cardano-foundation/CIPs/blob/8fd78f984b6b6686b33932713890b16ee571081b/CIP-0094/README.md)
+
+## [10.2.3] - 2023-04-28
+#### Fixed
+- Additional HW signing fixes
+
+## [10.2.2] - 2023-04-24
+#### Fixed
+- Add special case handling for hardware wallets to use stake keys as witness for registering stake address
+
+## [10.2.1] - 2023-04-04
+#### Fixed
+- Moved `test_koios` call from cntools.library to cntools.sh
+
+## [10.2.0] - 2023-03-13
+#### Fixed
+- HW signing fix due to deprecated cardano-hw-cli sign call.
+- The check whether to use Koios API or not (env config) wasn't properly handled.
+#### Changed
+- Disabled Koios for balance lookup to prefer local node check. In most circumstances this will be faster due to low latency. If needed, set WALLET_SELECTION_FILTER_LIMIT in cntools.sh to a lower limit to skip balance lookup on wallet selection if you have many wallets and delay is too long.
+
+## [10.1.1] - 2023-02-07
+#### Fixed
+- Disable `dialog` by default, it is an optional component - and no longer installed by default.
+
+## [10.1.0] - 2023-01-17
+#### Added
+- Hardware Wallets: Allow signing using cold keys for a pool, use it for rotating KES keys.
+
+#### Changed
+- Keep deployment consistent with guild-deploy.sh
+
+#### Fixed
+- Fix parsing space in the name of assets
+
 ## [10.0.5] - 2022-11-07
 #### Changed
 - Updated testnet token registry to be reused for each non-mainnet network
@@ -280,7 +437,7 @@ Note: Version incremented thrice on PR branch itself
 ## [8.1.4] - 2021-04-05
 ##### Changed
 - Enhanced minimum utxo calculation (credits to Martin providing this)
-  - based on calculations from https://github.com/input-output-hk/cardano-ledger-specs/blob/master/doc/explanations/min-utxo.rst
+  - based on calculations from https://github.com/intersectmbo/cardano-ledger/blob/master/doc/explanations/min-utxo-mary.rst
 - Validation of wallet address balance on transactions improved
 
 ## [8.1.3] - 2021-04-01
@@ -576,7 +733,7 @@ Only the most noticeable changes added to changelog.
 - Pool registration and de-registration certificates removed in case of retire/re-registration
 - KES Expiry to use KES Period instead of Epoch duration
 - Block Collector script adapted for cardano-node 1.19.0.
-  - Block hash is now truncated in log, issue https://github.com/input-output-hk/cardano-node/issues/1738
+  - Block hash is now truncated in log, issue https://github.com/intersectmbo/cardano-node/issues/1738
 - High cpu usage reported in a few cases when running Block Collector
   - Depending on log level, parsing and byte64 enc each entry with jq could potentially put high load on weaker systems. Replaced with grep to only parse entries containing specific traces.
 - Docs for creating systemd block collector service file updated to include user env in run command

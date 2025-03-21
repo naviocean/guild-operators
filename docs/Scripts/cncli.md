@@ -15,7 +15,7 @@
 
 The script works in tandem with [Log Monitor](../Scripts/logmonitor.md) to provide faster adopted status but mainly to catch slots the node is leader for but are unable to create a block for. These are marked as invalid. Blocklog will however work fine without the `logMonitor` service and `CNCLI` is able to handle everything except catching invalid blocks.
 
-1. Run the latest version of `prereqs.sh` with `prereqs.sh -c` to download and install RUST and CNCLI. IOG fork of libsodium required by CNCLI is automatically compiled by CNCLI build process. If a previous installation is found, RUST and CNCLI will be updated to the latest version.
+1. Run the latest version of `guild-deploy.sh` with `guild-deploy.sh -s c` to download and install RUST and CNCLI. IOG fork of libsodium required by CNCLI is automatically compiled by CNCLI build process. If a previous installation is found, RUST and CNCLI will be updated to the latest version.
 2. Run `deploy-as-systemd.sh` to deploy the systemd services that handle all the work in the background. Six systemd services in total are deployed whereof four are related to CNCLI. See above for the different purposes they serve.
 3. If you want to disable some of the deployed services, run `sudo systemctl disable <service>`
 
@@ -50,7 +50,7 @@ You can override the values in the script at the User Variables section shown be
 Services are controlled by `sudo systemctl <status|start|stop|restart> <service name>`  
 All services are configured as child services to `cnode.service` and as such, when an action is taken against this service it's replicated to all child services. E.g running `sudo systemctl start cnode.service` will also start all child services. 
 
-Log output is handled by syslog and end up in the systems standard syslog file, normally `/var/log/syslog`. `journalctl -f -u <service>` can be used to check service output (follow mode). Other logging configurations are not covered here. 
+Log output is handled by journald. `journalctl -f -u <service>` can be used to check service output (follow mode). Other logging configurations are not covered here. 
 
 Recommended workflow to get started with CNCLI blocklog.
 

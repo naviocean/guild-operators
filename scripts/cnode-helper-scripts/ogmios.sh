@@ -9,9 +9,11 @@
 # Common variables set in env file   #
 ######################################
 
-#OGMIOSBIN="${HOME}"/.cabal/bin/ogmios        # Path for ogmios binary, if not in $PATH
+#OGMIOSBIN="${HOME}"/.local/bin/ogmios        # Path for ogmios binary, if not in $PATH
 #HOSTADDR=127.0.0.1                           # Default Listen IP/Hostname for Ogmios Server
 #HOSTPORT=1337                                # Default Listen port for Ogmios Server
+#LOG_LEVEL=Notice                             # Debug | Info | Notice | Warning | Error | Off
+#CLI_ARGS="--include-cbor"                    # Additional CLI arguments to ogmios
 
 ######################################
 # Do NOT modify code below           #
@@ -34,9 +36,22 @@ usage() {
 }
 
 set_defaults() {
-  [[ -z "${OGMIOSBIN}" ]] && OGMIOSBIN="${HOME}"/.cabal/bin/ogmios
+  [[ -z "${OGMIOSBIN}" ]] && OGMIOSBIN="${HOME}"/.local/bin/ogmios
   [[ -z "${HOSTADDR}" ]] && HOSTADDR=127.0.0.1
   [[ -z "${HOSTPORT}" ]] && HOSTPORT=1337
+  [[ -z "${CLI_ARGS}" ]] && CLI_ARGS="--include-cbor"
+  if [[ -z "${LOG_LEVEL}" ]]; then
+    LOG_LEVEL=Notice
+  else
+    case ${LOG_LEVEL} in
+      Debug)   : ;;
+      Info)    : ;;
+      Warning) : ;;
+      Error)   : ;;
+      Off)     : ;;
+      *) LOG_LEVEL=Notice ;;
+    esac
+  fi
 }
 
 pre_startup_sanity() {
@@ -67,8 +82,6 @@ deploy_systemd() {
 	ExecStart=/bin/bash -l -c \"exec ${CNODE_HOME}/scripts/ogmios.sh \"
 	KillSignal=SIGINT
 	SuccessExitStatus=143
-	StandardOutput=syslog
-	StandardError=syslog
 	SyslogIdentifier=${CNODE_VNAME}-ogmios
 	TimeoutStopSec=5
 	KillMode=mixed
@@ -91,7 +104,7 @@ while getopts :d opt; do
 done
 
 # Check if env file is missing in current folder (no update checks as will mostly run as daemon), source env if present
-[[ ! -f "$(dirname $0)"/env ]] && echo -e "\nCommon env file missing, please ensure latest prereqs.sh was run and this script is being run from ${CNODE_HOME}/scripts folder! \n" && exit 1
+[[ ! -f "$(dirname $0)"/env ]] && echo -e "\nCommon env file missing, please ensure latest guild-deploy.sh was run and this script is being run from ${CNODE_HOME}/scripts folder! \n" && exit 1
 . "$(dirname $0)"/env
 case $? in
   1) echo -e "ERROR: Failed to load common env file\nPlease verify set values in 'User Variables' section in env file or log an issue on GitHub" && exit 1;;
@@ -108,4 +121,4 @@ fi
 pre_startup_sanity
 
 # Run Ogmios Server
-"${OGMIOSBIN}" --node-config "${CONFIG}" --node-socket "${CARDANO_NODE_SOCKET_PATH}" --host ${HOSTADDR} --port ${HOSTPORT} >> "${LOG_DIR}"/ogmios.log 2>&1
+"${OGMIOSBIN}" --node-config "${CONFIG}" --node-socket "${CARDANO_NODE_SOCKET_PATH}" --host ${HOSTADDR} --port ${HOSTPORT} ${CLI_ARGS} --log-level ${LOG_LEVEL} >> "${LOG_DIR}"/ogmios.log 2>&1

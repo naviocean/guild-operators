@@ -1,12 +1,13 @@
 !!! tip "Reminder !!"
-    - Since the network has to get along without the P2P network module for the time being, it needs static topology files. This "TopologyUpdater" service, which is far from being perfect due to its centralization factor, is intended to be a **temporary** solution to allow everyone to activate their relay nodes without having to postpone and wait for manual topology completion requests.
+    - Starting cardano-node release 8.9.2, it is recommended to run node with P2P config enabled. If running node with P2P, one does not require to run topology updater anymore.
+    - Since the network had to get along without the P2P network module for a while, it needed static topology files. This "TopologyUpdater" service, which was far from being perfect due to its centralization factor, was intended to be a **temporary** solution to allow everyone to activate their relay nodes without having to postpone and wait for manual topology completion requests.
     - You should **NOT** set up topologyUpdater for your block producing nodes.
 
 The topologyUpdater shell script must be executed on the relay node as a cronjob **exactly every 60 minutes**. After **4 consecutive requests (3 hours)** the node is considered a new relay node in listed in the topology file. If the node is turned off, it's automatically delisted after 3 hours.
 
 #### Download and Configure {: id="download"}
 
-If you have run [prereqs.sh](../basics.md#pre-requisites), this should already be available in your scripts folder and make this step unnecessary.
+If you have run [guild-deploy.sh](../basics.md#pre-requisites), this should already be available in your scripts folder and make this step unnecessary.
 
 Before the updater can make a valid request to the central topology service, it must query the current tip/blockNo from the well-synced local node. It connects to your node through the configuration in the script as well as the common `env` configuration file. Customize these files for your needs.
 
@@ -33,17 +34,17 @@ Out of the box, the scripts might come with some assumptions, that may or may no
 CNODE_HOSTNAME="CHANGE ME"                                # (Optional) Must resolve to the IP you are requesting from
 CNODE_VALENCY=1                                           # (Optional) for multi-IP hostnames
 MAX_PEERS=15                                              # Maximum number of peers to return on successful fetch
-#CUSTOM_PEERS="None"                                      # Additional custom peers to (IP:port[:valency]) to add to your target topology.json
-                                                          # eg: "10.0.0.1:3001|10.0.0.2:3002|relays.mydomain.com:3003:3"
+#CUSTOM_PEERS="None"                                      # Additional custom peers to (IP,port[,valency]) to add to your target topology.json
+                                                          # eg: "10.0.0.1,3001|10.0.0.2,3002|relays.mydomain.com,3003,3"
 #BATCH_AUTO_UPDATE=N                                      # Set to Y to automatically update the script if a new version is available without user interaction
 ```
 
-Any customisations you add above, will be saved across future `prereqs.sh` executions, unless you specify the `-f` flag to overwrite completely.
+Any customisations you add above, will be saved across future `guild-deploy.sh` executions, unless you specify the `-f` flag to overwrite completely.
 
 #### Deploy the script {: id="deploy"}
 
 **systemd service**  
-The script can be deployed as a background service in different ways but the recommended and easiest way if [prereqs.sh](../basics.md#pre-requisites) was used, is to utilize the `deploy-as-systemd.sh` script to setup and schedule the execution. This will deploy both push & fetch service files as well as timers for a scheduled 60 min node alive message and cnode restart at the user set interval (default: 24 hours) when running the deploy script.
+The script can be deployed as a background service in different ways but the recommended and easiest way if [guild-deploy.sh](../basics.md#pre-requisites) was used, is to utilize the `deploy-as-systemd.sh` script to setup and schedule the execution. This will deploy both push & fetch service files as well as timers for a scheduled 60 min node alive message and cnode restart at the user set interval (default: 24 hours) when running the deploy script.
 
 - `cnode-tu-push.service`    : pushes a node alive message to Topology Updater API
 - `cnode-tu-push.timer`      : schedules the push service to execute once every hour
@@ -84,7 +85,7 @@ Note that the change in topology is only effective upon restart of your node. Ma
 Most of the Stake Pool Operators may have few preferences (own relays, close friends, etc) that they would like to add to their topology by default. This is where the `CUSTOM_PEERS` variable in `topologyUpdater.sh` comes in. You can add a list of peers in the format of: `hostname/IP:port[:valency]` here and the output `topology.json` formed will already include the custom peers that you supplied. Every custom peer is defined in the form `[address]:[port]` and optional `:[valency]` (if not specified, the valency defaults to `1`). Multiple custom peers are separated by `|`. An example of a valid `CUSTOM_PEERS` variable would be:
 
 ```bash
-CUSTOM_PEERS="foo.bar.io:3001:2|198.175.21.197:6001|36.233.3.89:6000
+CUSTOM_PEERS="foo.bar.io,3001,2|198.175.21.197,6001|36.233.3.89,6000
 ```
 The list above would add three custom peers with the specified addresses and ports, with the first one additionally specifying the optional valency parameter (in this case `2`).
 

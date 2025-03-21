@@ -1,14 +1,14 @@
 !!! important
 
     - An average pool operator may not require this component at all. Please verify if it is required for your use as mentioned [here](../build.md#components)
-    - Ensure that you have setup [DBSync](../Build/dbsync.md) and that it is in sync atleast to Mary fork before you proceed. *IF* you're participating in Koios services, ensure that you're using [latest dbsync release](https://github.com/input-output-hk/cardano-db-sync/releases/latest)
+    - Ensure that you have setup [DBSync](../Build/dbsync.md) and that it is in sync atleast to Mary fork before you proceed. *IF* you're participating in Koios services, ensure that you're using [latest dbsync release](https://github.com/intersectmbo/cardano-db-sync/releases/latest)
 
 ### What is gRest
 
 gRest is an open source implementation of a `query layer built over dbsync using PostgREST and HAProxy`. The package is built as part of [Koios](https://www.koios.rest) team's efforts to unite community individual stream of work together and give back a more aligned structure to query dbsync and adopt standardisation to queries utilising open-source tooling as well as collaboration. In addition to these, there are also accessibility features to deploy rules for failover, do healthchecks, set up priorities, have ability to prevent DDoS attacks, provide timeouts, report tips for analysis over a longer period, etc - which can prove to be really useful when performing any analysis for instances.
 
-!!! warning ""
-    Note that the scripts below do allow for provisioning ogmios integration too, but Ogmios does not provide advanced session management for a server-client architecture in absence of a middleware. The availability for ogmios from monitoring instance is restricted to avoid ability to DDoS an instance.
+!!! info "Note"
+    Note that the scripts below do allow for provisioning ogmios integration too, but Ogmios - currently - is not designed to provide advanced session management for a server-client architecture in absence of a middleware. Thus, the availability for ogmios from monitoring instance is restricted to avoid ability to DDoS an instance.
 
 ### Components
 
@@ -28,7 +28,7 @@ PGPASSFILE=$CNODE_HOME/priv/.pgpass
 psql cexplorer
 ```
 
-Ensure that you can connect to your Postgres DB fine using above (quit from psql once validated using `\q`). As part of `prereqs.sh` execution, you'd find setup-grest.sh file made available in `${CNODE_HOME}/scripts` folder, which will help you automate installation of PostgREST, HAProxy as well as brings in latest queries/functions provided via Koios to your instances.
+Ensure that you can connect to your Postgres DB fine using above (quit from psql once validated using `\q`). As part of `guild-deploy.sh` execution, you'd find setup-grest.sh file made available in `${CNODE_HOME}/scripts` folder, which will help you automate installation of PostgREST, HAProxy as well as brings in latest queries/functions provided via Koios to your instances.
 
 !!! warning "Warning"
     As of now, gRest services are in alpha stage - while can be utilised, please remember there may be breaking changes and every collaborator is expected to work with the team to keep their instances up-to-date using alpha branch.
@@ -39,11 +39,10 @@ Familiarise with the usage options for the setup script , the syntax can be view
 cd "${CNODE_HOME}"/scripts
 ./setup-grest.sh -h
 #
-# Usage: setup-grest.sh [-f] [-i [p][r][m][c][d]] [-u] [-b <branch>]
+# Usage: setup-grest.sh [-i [p][r][m][c][d]] [-u] [-b <branch>]
 # 
-# Install and setup haproxy, PostgREST, polling services and create systemd services for haproxy, postgREST and dbsync
+# Install and setup haproxy, PostgREST, polling services and create systemd services for haproxy, postgREST and monitoring
 # 
-# -f    Force overwrite of all files including normally saved user config sections
 # -i    Set-up Components individually. If this option is not specified, components will only be installed if found missing (eg: -i prcd)
 #     p    Install/Update PostgREST binaries by downloading latest release from github.
 #     r    (Re-)Install Reverse Proxy Monitoring Layer (haproxy) binaries and config
@@ -51,9 +50,10 @@ cd "${CNODE_HOME}"/scripts
 #     c    Overwrite haproxy, postgREST configs
 #     d    Overwrite systemd definitions
 # -u    Skip update check for setup script itself
+# -r    Reset grest schema - drop all cron jobs and triggers, and remove all deployed RPC functions and cached tables
 # -q    Run all DB Queries to update on postgres (includes creating grest schema, and re-creating views/genesis table/functions/triggers and setting up cron jobs)
 # -b    Use alternate branch of scripts to download - only recommended for testing/development (Default: master)
-#
+# 
 ```
 
 To run the setup overwriting all standard deployment tasks from a branch (eg: `koios-1.0.9` branch), you may want to use:
@@ -77,32 +77,28 @@ The default ports used will make haproxy instance available at port 8053 or 8453
 
 !!! info "Reminder"
 
-Once you've successfully deployed the grest instance, it will deploy certain cron jobs that will ensure the relevant cache tables are updated periodically. Until these have finished (especially on first run, it could take an hour or so on mainnet, your instance will likely not pass any tests from `grest-poll.sh` but that's expected.
+    Once you've successfully deployed the grest instance, it will deploy certain cron jobs that will ensure the relevant cache tables are updated periodically. Until these have finished (especially on first run, it could take an hour or so on mainnet, your instance will likely not pass any tests from `grest-poll.sh` but that's expected.
 
 ### Enable TLS on HAProxy {: id="tls"}
 
-In order to enable SSL on your haproxy, all you need to do is edit the file `${CNODE_HOME}/files/haproxy.cfg` and update the *frontend app* section to disable normal bind and enable ssl bind.
+In order to enable SSL on your haproxy, all you need to do is edit the file `${CNODE_HOME}/files/haproxy.cfg` and update the *frontend app* section to uncomment ssl bind (and comment normal bind).
 
-!!! info ""
+!!! info
 
     - server.pem referred below should be a chain containing server TLS certificate, signing certificates (intermediate/root) and private key.
     - Make sure to replace the hostname to the CNAME/SAN used to create your TLS certificate.
 
-If you're not familiar with how to configure TLS OR would not like to buy one, you can find tips on how to create a TLS certificate for free via LetsEncrypt using tutorials [here](https://letsencrypt.org/getting-started/). Once you do have a TLS Certificate generated, you need to chain the private key and full chain cert together in a file - `/etc/ssl/server.pem` in example below:
+If you're not familiar with how to configure TLS OR would not like to buy one, you can find tips on how to create a TLS certificate for free via LetsEncrypt using tutorials [here](https://letsencrypt.org/getting-started/). Once you do have a TLS Certificate generated, you need to chain the private key and full chain cert together in a file - `/etc/ssl/server.pem` - which can be then referenced as below:
 
 ```
 frontend app
-  bind 0.0.0.0:8053
-  http-request set-log-level silent
-  http-request replace-value Host (.*):8053 servername.koios.rest:8453
-  redirect scheme https code 301 if !{ ssl_fc }
-
-frontend app-secured
+  #bind 0.0.0.0:8053
+  ## If using SSL, comment line above and uncomment line below
   bind :8453 ssl crt /etc/ssl/server.pem no-sslv3
   http-request set-log-level silent
-  acl srv_down nbsrv(grest_postgrest) le 1
+  acl srv_down nbsrv(grest_postgrest) eq 0
   acl is_wss hdr(Upgrade) -i websocket
-  http-request use-service prometheus-exporter if { path /metrics }
+  ...
 ```
 Restart haproxy service for changes to take effect.
 
@@ -111,7 +107,7 @@ Restart haproxy service for changes to take effect.
 With the setup, you also have a `checkstatus.sh` script, which will query the Postgres DB instance via haproxy (coming through postgREST), and only show an instance up if the latest block in your DB instance is within 180 seconds.
 
 !!! warning "Important"
-    While currently the HAProxy config only checks for tip, there will be test cases added for validating each endpoint in future. If you'd like to participate in joining to the elastic cluster via Koios, please raise a PR request by editing topology files in [this folder](https://github.com/cardano-community/koios-artifacts/tree/main/topology) to do so!!
+    If you'd like to participate in joining to the elastic cluster via Koios, please raise a PR request by editing topology files in [this folder](https://github.com/cardano-community/koios-artifacts/tree/main/topology) to do so!!
 
 If you were using `guild` network, you could do a couple of very basic sanity checks as per below:
 

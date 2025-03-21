@@ -2,15 +2,12 @@
 # shellcheck disable=SC2086
 #shellcheck source=/dev/null
 
-. "$(dirname $0)"/env offline
-
 ######################################
 # User Variables - Change as desired #
 # Common variables set in env file   #
 ######################################
 
-#CPU_CORES=2              # Number of CPU cores cardano-node process has access to (please don't set higher than physical core count, 2-4 recommended)
-#MEMPOOL_BYTES=8388608    # Override mempool in bytes (Default: Do not override)
+#CPU_CORES=4              # Number of CPU cores cardano-node process has access to (please don't set higher than physical core count, recommended to set atleast to 4)
 #CNODE_LISTEN_IP4=0.0.0.0 # IP to use for listening (only applicable to Node Connection Port) for IPv4
 #CNODE_LISTEN_IP6=::      # IP to use for listening (only applicable to Node Connection Port) for IPv6
 
@@ -36,14 +33,31 @@ usage() {
 }
 
 set_defaults() {
-  [[ -n ${CPU_CORES} ]] && CPU_RUNTIME=( "+RTS" "-N${CPU_CORES}" "-RTS" ) || CPU_RUNTIME=()
+  [[ -z ${CPU_CORES} ]] && CPU_CORES=4
+  [[ -n ${CPU_CORES} ]] && CPU_RUNTIME=( "+RTS" "-N${CPU_CORES}" "-RTS" )
   [[ -z ${CNODE_LISTEN_IP4} ]] && CNODE_LISTEN_IP4=0.0.0.0
   [[ -z ${CNODE_LISTEN_IP6} ]] && CNODE_LISTEN_IP6=::
   [[ ! -d "${LOG_DIR}/archive" ]] && mkdir -p "${LOG_DIR}/archive"
   host_addr=()
   [[ ${IP_VERSION} = "4" || ${IP_VERSION} = "mix" ]] && host_addr+=("--host-addr" "${CNODE_LISTEN_IP4}")
   [[ ${IP_VERSION} = "6" || ${IP_VERSION} = "mix" ]] && host_addr+=("--host-ipv6-addr" "${CNODE_LISTEN_IP6}")
-  [[ -z ${MEMPOOL_BYTES} ]] && MEMPOOL_OVERRIDE="" || MEMPOOL_OVERRIDE="--mempool-capacity-override ${MEMPOOL_BYTES}"
+}
+
+check_config_sanity() {
+  BYGENHASH=$("${CCLI}" byron genesis print-genesis-hash --genesis-json "${BYRON_GENESIS_JSON}" 2>/dev/null)
+  BYGENHASHCFG=$(jq '.ByronGenesisHash' <"${CONFIG}" 2>/dev/null)
+  SHGENHASH=$("${CCLI}" latest genesis hash --genesis "${GENESIS_JSON}" 2>/dev/null)
+  SHGENHASHCFG=$(jq '.ShelleyGenesisHash' <"${CONFIG}" 2>/dev/null)
+  ALGENHASH=$("${CCLI}" latest genesis hash --genesis "${ALONZO_GENESIS_JSON}" 2>/dev/null)
+  ALGENHASHCFG=$(jq '.AlonzoGenesisHash' <"${CONFIG}" 2>/dev/null)
+  CWGENHASH=$("${CCLI}" latest genesis hash --genesis "${CONWAY_GENESIS_JSON}" 2>/dev/null)
+  CWGENHASHCFG=$(jq '.ConwayGenesisHash' <"${CONFIG}" 2>/dev/null)
+  # If hash are missing/do not match, add that to the end of config. We could have sorted it based on logic, but that would mess up sdiff comparison outputs
+  if [[ "${BYGENHASH}" != "${BYGENHASHCFG}" ]] || [[ "${SHGENHASH}" != "${SHGENHASHCFG}" ]] || [[ "${ALGENHASH}" != "${ALGENHASHCFG}" ]] || [[ "${CWGENHASH}" != "${CWGENHASHCFG}" ]]; then
+    cp "${CONFIG}" "${CONFIG}".tmp
+    jq --arg BYGENHASH ${BYGENHASH} --arg SHGENHASH ${SHGENHASH} --arg ALGENHASH ${ALGENHASH} --arg CWGENHASH ${CWGENHASH} '.ByronGenesisHash = $BYGENHASH | .ShelleyGenesisHash = $SHGENHASH | .AlonzoGenesisHash = $ALGENHASH | .ConwayGenesisHash = $CWGENHASH' <"${CONFIG}" >"${CONFIG}".tmp
+    [[ -s "${CONFIG}".tmp ]] && mv -f "${CONFIG}".tmp "${CONFIG}"
+  fi
 }
 
 pre_startup_sanity() {
@@ -59,6 +73,16 @@ pre_startup_sanity() {
   fi
   # Move logs to archive
   [[ $(find "${LOG_DIR}"/node*.json 2>/dev/null | wc -l) -gt 0 ]] && mv "${LOG_DIR}"/node*.json "${LOG_DIR}"/archive/
+  check_config_sanity
+}
+
+mithril_snapshot_download() {
+  [[ -z "${MITHRIL_CLIENT}" ]] && MITHRIL_CLIENT="${CNODE_HOME}"/scripts/mithril-client.sh
+  if [[ ! -f "${MITHRIL_CLIENT}" ]] || [[ ! -e "${MITHRIL_CLIENT}" ]]; then 
+    echo "ERROR: Could not locate mithril-client.sh script or script is not executable. Skipping mithril cardano-db snapshot download!!"
+  else
+    "${MITHRIL_CLIENT}" -u cardano-db download
+  fi
 }
 
 stop_node() {
@@ -112,9 +136,10 @@ while getopts :ds opt; do
   esac
 done
 
+[[ ${0} != '-bash' ]] && PARENT="$(dirname $0)" || PARENT="$(pwd)"
 # Check if env file is missing in current folder (no update checks as will mostly run as daemon), source env if present
-[[ ! -f "$(dirname $0)"/env ]] && echo -e "\nCommon env file missing, please ensure latest prereqs.sh was run and this script is being run from ${CNODE_HOME}/scripts folder! \n" && exit 1
-. "$(dirname $0)"/env offline
+[[ ! -f "${PARENT}"/env ]] && echo -e "\nCommon env file missing in \"${PARENT}\", please ensure latest guild-deploy.sh was run and this script is being run from ${CNODE_HOME}/scripts folder! \n" && exit 1
+. "${PARENT}"/env offline
 case $? in
   1) echo -e "ERROR: Failed to load common env file\nPlease verify set values in 'User Variables' section in env file or log an issue on GitHub" && exit 1;;
   2) clear ;;
@@ -131,9 +156,14 @@ if [[ "${DEPLOY_SYSTEMD}" == "Y" ]]; then
 fi
 pre_startup_sanity
 
+# Download the latest mithril snapshot before starting node
+if [[ "${MITHRIL_DOWNLOAD}" == "Y" ]]; then
+  mithril_snapshot_download
+fi
+
 # Run Node
 if [[ -f "${POOL_DIR}/${POOL_OPCERT_FILENAME}" && -f "${POOL_DIR}/${POOL_VRF_SK_FILENAME}" && -f "${POOL_DIR}/${POOL_HOTKEY_SK_FILENAME}" ]]; then
-  "${CNODEBIN}" "${CPU_RUNTIME[@]}" run \
+  exec "${CNODEBIN}" "${CPU_RUNTIME[@]}" run \
     --topology "${TOPOLOGY}" \
     --config "${CONFIG}" \
     --database-path "${DB_DIR}" \
@@ -144,7 +174,7 @@ if [[ -f "${POOL_DIR}/${POOL_OPCERT_FILENAME}" && -f "${POOL_DIR}/${POOL_VRF_SK_
     --port ${CNODE_PORT} \
     ${MEMPOOL_OVERRIDE} "${host_addr[@]}"
 else
-  "${CNODEBIN}" "${CPU_RUNTIME[@]}" run \
+  exec "${CNODEBIN}" "${CPU_RUNTIME[@]}" run \
     --topology "${TOPOLOGY}" \
     --config "${CONFIG}" \
     --database-path "${DB_DIR}" \

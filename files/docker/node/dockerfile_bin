@@ -1,0 +1,112 @@
+FROM debian:stable-slim
+
+# DEFINE THE PREFERRED STOP SIGNAL
+STOPSIGNAL SIGINT
+
+LABEL desc="Cardano Node by Guild's Operators"
+ARG DEBIAN_FRONTEND=noninteractive
+ARG G_ACCOUNT=cardano-community
+ARG GUILD_DEPLOY_BRANCH=master
+
+USER root
+WORKDIR /
+
+ENV \
+    ENV=/etc/profile \
+    LC_ALL=en_US.UTF-8 \
+    LANG=en_US.UTF-8 \
+    LANGUAGE=en_US.UTF-8 \
+    CNODE_HOME=/opt/cardano/cnode \
+    CARDANO_NODE_SOCKET_PATH=$CNODE_HOME/sockets/node.socket \
+    PATH=/opt/cardano/cnode/scripts:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/home/guild/.local/bin \
+    GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt \
+    UPDATE_CHECK=N
+
+RUN apt-get update && apt-get install --no-install-recommends -y locales apt-utils sudo \
+    && apt install -y curl wget udev jq \
+    && apt-get -y purge \
+    && apt-get -y clean \
+    && apt-get -y autoremove \
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen \
+    && locale-gen \
+    && echo "export LC_ALL=en_US.UTF-8" >> ~/.bashrc \
+    && echo "export LANG=en_US.UTF-8" >> ~/.bashrc \
+    && echo "export LANGUAGE=en_US.UTF-8" >> ~/.bashrc \
+    && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+RUN adduser --disabled-password --gecos '' guild \
+    && adduser guild sudo \
+    && mkdir -pv /home/guild/.local/ /home/guild/.scripts/ 
+
+RUN set -x && apt update \
+    && apt-get update \
+    && mkdir -p /root/.local/bin \
+    && wget https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh \
+    && export SUDO='N' \
+    && export SKIP_DBSYNC_DOWNLOAD='Y' \
+    && export G_ACCOUNT=${G_ACCOUNT} \
+    && chmod +x ./guild-deploy.sh && ./guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -s p \
+    && ls /opt/ \
+    && mkdir -p $CNODE_HOME/priv/files \
+    && apt-get -y purge \
+    && apt-get -y clean \
+    && apt-get -y autoremove \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -x && export SUDO='N' \
+    && export SKIP_DBSYNC_DOWNLOAD='Y' \
+    && export G_ACCOUNT=${G_ACCOUNT} \
+    && ./guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -s dcmowx \
+    && chown -R guild:guild $CNODE_HOME \
+    && mv /root/.local/bin /home/guild/.local/ \
+    && chown -R guild:guild /home/guild/.*
+
+# Add final tools in a separate layer to shrink the largest layer
+RUN apt-get update \
+    && apt-get install -y procps libcap2 libselinux1 libc6 libsodium-dev ncurses-bin iproute2 xz-utils netbase coreutils dnsutils net-tools procps tcptraceroute bc usbip sqlite3 python3 tmux ncurses-base libtool autoconf tcptraceroute util-linux less openssl bsdmainutils dialog vim socat \
+    && apt-get -y purge \
+    && apt-get -y clean \
+    && apt-get -y autoremove \
+    && rm -rf /var/lib/apt/lists/*
+
+
+RUN bash -c 'networks=(guild mainnet preprod preview sanchonet); files=({alonzo,byron,conway,shelley}-genesis.json config.json db-sync-config.json topology.json); \
+    for network in "${networks[@]}"; do \
+        mkdir -pv /conf/${network} && \
+        for file in "${files[@]}"; do \
+            curl -s -o /conf/${network}/$file https://raw.githubusercontent.com/'${G_ACCOUNT}'/guild-operators/'${GUILD_DEPLOY_BRANCH}'/files/configs/${network}/${file}; \
+        done; \
+    done'
+
+USER guild
+WORKDIR /home/guild
+
+# Commit Version
+RUN  curl -sL -H "Accept: application/vnd.github.everest-preview+json" -H "Content-Type: application/json" https://api.github.com/repos/${G_ACCOUNT}/guild-operators/commits | grep -v md | grep -A 2 guild-deploy.sh | grep sha | head -n 1 | cut -d "\"" -f 4 > ~/guild-latest.txt \
+    && echo "head -n 8 /home/guild/.scripts/banner.txt" >> ~/.bashrc \
+    && echo "grep MENU -A 6 /home/guild/.scripts/banner.txt | grep -v MENU" >> ~/.bashrc \
+    && echo "alias env=/usr/bin/env" >> ~/.bashrc \
+    && echo "alias cntools=$CNODE_HOME/scripts/cntools.sh" >> ~/.bashrc \
+    && echo "alias gLiveView=$CNODE_HOME/scripts/gLiveView.sh" >> ~/.bashrc \
+    && echo "export PATH=/opt/cardano/cnode/scripts:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/home/guild/.local/bin"  >> ~/.bashrc 
+
+
+# ENTRY SCRIPT
+ADD https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/files/docker/node/addons/banner.txt \
+    https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/files/docker/node/addons/block_watcher.sh \
+    https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/files/docker/node/addons/healthcheck.sh /home/guild/.scripts/
+ADD https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh \
+    https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/mithril-client.sh \
+    https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/mithril-signer.sh \
+    https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/mithril-relay.sh /opt/cardano/cnode/scripts/
+ADD https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/files/docker/node/addons/entrypoint.sh ./
+
+RUN sudo chmod -R a+rx /home/guild/.scripts/*.sh /opt/cardano/cnode/scripts/*.sh /home/guild/entrypoint.sh /conf \
+    && sudo chown -R guild:guild /home/guild/.* $CNODE_HOME /conf
+
+HEALTHCHECK --start-period=5m --interval=5m --timeout=100s CMD /home/guild/.scripts/healthcheck.sh
+
+ENTRYPOINT ["./entrypoint.sh"]
+
+

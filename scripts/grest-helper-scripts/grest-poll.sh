@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#shellcheck disable=SC2034,SC1090
+#shellcheck disable=SC2034,SC1090 source=/dev/null
 
 ######################################
 # User Variables - Change as desired #
@@ -23,8 +23,12 @@ function set_defaults() {
   [[ -z "${API_COMPARE}" ]] && API_COMPARE="http://127.0.0.1:8050"
   [[ -z "${API_STRUCT_DEFINITION}" ]] && API_STRUCT_DEFINITION="https://api.koios.rest/koiosapi.yaml"
   [[ -z "${LOCAL_SPEC}" ]] && LOCAL_SPEC="${PARENT}/../files/koiosapi.yaml"
-  [[ "${HAPROXY_SERVER_NAME}" == *ssl ]] && SCHEME="https" || SCHEME="http"
-  GURL="${SCHEME}://${1}:${2}"
+  [[ "${HAPROXY_SERVER_SSL}" == 1 ]] && SCHEME="https" || SCHEME="http"
+  if [[ $# == 2 ]]; then
+    GURL="${SCHEME}://${1}:${2}"
+  else
+    GURL="${SCHEME}://${HAPROXY_SERVER_ADDR}:${HAPROXY_SERVER_PORT}"
+  fi
   URLRPC="${GURL}/${APIPATH}"
 }
 
@@ -33,14 +37,14 @@ function chk_upd() {
   curr_hour=$(date +%H)
   if [[ ! -f "${PARENT}"/.last_grest_poll ]]; then
     echo "${curr_hour}" > "${PARENT}"/.last_grest_poll
-    curl -sfkL "${API_STRUCT_DEFINITION}" -o "${LOCAL_SPEC}" 2>/dev/null
+    curl -m 2 -sfkL "${API_STRUCT_DEFINITION}" -o "${LOCAL_SPEC}" 2>/dev/null
   else
     last_hour=$(cat "${PARENT}"/.last_grest_poll)
     [[ "${curr_hour}" == "${last_hour}" ]] && SKIP_UPDATE=Y || echo "${curr_hour}" > "${PARENT}"/.last_grest_poll
   fi
   if [[ ! -f "${PARENT}"/env ]]; then
     echo -e "\nCommon env file missing: ${PARENT}/env"
-    echo -e "This is a mandatory prerequisite, please install with prereqs.sh or manually download from GitHub\n"
+    echo -e "This is a mandatory prerequisite, please install with guild-deploy.sh or manually download from GitHub\n"
     exit 1
   fi
 
@@ -51,14 +55,15 @@ function chk_upd() {
     exit 1
   fi
   
-  curl -sfkL "${API_STRUCT_DEFINITION}" -o "${LOCAL_SPEC}" 2>/dev/null
+  curl -m 2 -sfkL "${API_STRUCT_DEFINITION}" -o "${LOCAL_SPEC}" 2>/dev/null
 
   checkUpdate "${PARENT}"/grest-poll.sh Y N N grest-helper-scripts
   [[ "$?" == "2" ]] && echo "ERROR: checkUpdate Failed" && exit 1
 }
 
 function log_err() {
-  echo "$(date +%DT%T)	- ERROR: ${HAPROXY_SERVER_NAME}" "$@" >> "${LOG_DIR}"/grest-poll.sh_"$(date +%d%m%y)"
+  [[ "${DEBUG_MODE}" == "1" ]] && echo "$(date +%DT%T) - ERROR: ${HAPROXY_SERVER_NAME}" "$@"
+  echo "$(date +%DT%T) - ERROR: ${HAPROXY_SERVER_NAME}" "$@" >> "${LOG_DIR}"/grest-poll.sh_"$(date +%d%m%y)"
 }
 
 function optexit() {
@@ -66,30 +71,21 @@ function optexit() {
 }
 
 function usage() {
-  echo -e "\nUsage: $(basename "$0") <haproxy IP> <haproxy port> <server IP> <server port> [-d]\n"
-  echo -e "Polling script used by haproxy to query server IP at server Port, and perform health checks. Use '-d' parameter to run all health checks.\n\n"
+  echo -e "\nUsage: $(basename "$0") <server IP> <server port> [-d]\n"
+  echo -e "Polling script used by haproxy to query 'server IP' at 'server Port', and perform health checks. Use '-d' parameter to run all health checks.\n\n"
   exit 1
 }
 
 function chk_version() {
-  instance_vr=$(curl -sfkL "${GURL}/control_table?key=eq.version&select=last_value" | jq -r '.[0].last_value' 2>/dev/null)
-  monitor_vr=$(curl -sf "${API_STRUCT_DEFINITION}" | grep ^\ \ version|awk '{print $2}' 2>/dev/null)
+  ctrl_tbl=$(curl -m 2 -skL "${GURL}/control_table")
+  instance_vr=$(jq -r 'map(select(.key == "version"))[0].last_value' 2>/dev/null <<< "${ctrl_tbl}")
+  monitor_vr=$(grep ^\ \ version "${LOCAL_SPEC}" |awk '{print $2}' 2>/dev/null)
 
   if [[ -z "${instance_vr}" ]] || [[ "${instance_vr}" == "[]" ]]; then
-    [[ "${DEBUG_MODE}" == "1" ]] && echo "Response received for ${GURL} version: ${instance_vr}"
-    log_err "Could not fetch the grest version for ${GURL} !!"
+    log_err "Could not fetch the grest version for ${GURL} using control_table endpoint (response received: ${instance_vr})!!"
     optexit
   elif [[ "${instance_vr}" != "${monitor_vr}" ]]; then
-    [[ "${DEBUG_MODE}" == "1" ]] && echo "${GURL} grest version: ${instance_vr}, ${API_COMPARE} grest version: ${monitor_vr}"
-    log_err "Version mismatch for ${GURL} !!"
-    optexit
-  fi
-}
-
-function chk_is_up() {
-  rc=$(curl -sf "${GURL}"/ready -I 2>/dev/null | grep x-failover)
-  if [[ "${rc}" != "" ]]; then
-    log_err "${GURL}/ready status check failed!!"
+    log_err "Version mismatch: ${GURL} is at version : ${instance_vr} while ${API_STRUCT_DEFINITION} (cached) is on version: ${monitor_vr}!!"
     optexit
   fi
 }
@@ -116,11 +112,11 @@ function chk_tip() {
 }
 
 function chk_rpc_struct() {
-  srvr_spec="$(curl -skL "${1}" | jq 'leaf_paths as $p | [$p[] | tostring] |join(".")' 2>/dev/null)"
-  api_endpts="$(grep ^\ \ / "${LOCAL_SPEC}" | sed -e 's#  /#/#g' -e 's#:##' | sort)"
+  srvr_spec="$(curl -skL "${1}" | jq '[paths(scalars) as $p | { "key": $p | map(tostring) | join("_"), "value": getpath($p) }] | from_entries' | awk '{print $1 " " $2}' | grep -e ^\"paths -e ^\"parameters -e ^\"definitions 2>/dev/null)"
+  api_endpts="$(grep ^\ \ / "${LOCAL_SPEC}" | awk '{print $1}' | sed -e 's#:##' | sort)"
   for endpt in ${api_endpts}
   do
-    echo "${srvr_spec}" | grep -e "paths.*.${endpt}\\."
+    echo "${srvr_spec}" | grep -e "paths.*.${endpt}_get" -e "paths.*.${endpt}_post"
   done
 }
 
@@ -134,11 +130,10 @@ function chk_rpcs() {
 }
 
 function chk_cache_status() {
-  last_stakedist_block=$(curl -skL "${GURL}/control_table?key=eq.stake_distribution_lbh" | jq -r .[0].last_value 2>/dev/null)
-  last_poolhist_update=$(curl -skL "${GURL}/control_table?key=eq.pool_history_cache_last_updated" | jq -r .[0].last_value 2>/dev/null)
-  last_actvstake_epoch=$(curl -skL "${GURL}/control_table?key=eq.last_active_stake_validated_epoch" | jq -r .[0].last_value 2>/dev/null)
-  last_snapshot_epoch=$(curl -skL "${GURL}/control_table?key=eq.last_stake_snapshot_epoch" | jq -r .[0].last_value 2>/dev/null)
-  if [[ "${last_stakedist_block}" == "" ]] || [[ "${last_stakedist_block}" == "[]" ]] || [[ $(( block_no - last_stakedist_block )) -gt 1000 ]]; then
+  last_stakedist_block=$(jq -r 'map(select(.key == "stake_distribution_lbh"))[0].last_value' 2>/dev/null <<< "${ctrl_tbl}")
+  last_poolhist_update=$(jq -r 'map(select(.key == "pool_history_cache_last_updated"))[0].last_value' 2>/dev/null <<< "${ctrl_tbl}")
+  last_actvstake_epoch=$(jq -r 'map(select(.key == "last_active_stake_validated_epoch"))[0].last_value' 2>/dev/null <<< "${ctrl_tbl}")
+  if [[ "${last_stakedist_block}" == "" ]] || [[ "${last_stakedist_block}" == "[]" ]] || [[ $(( block_no - last_stakedist_block )) -gt 2000 ]]; then
     log_err "Stake Distribution cache too far from tip !!"
     optexit
   fi
@@ -150,25 +145,19 @@ function chk_cache_status() {
     log_err "Active Stake cache not populated !!"
     optexit
   else
-      [[ -z "${GENESIS_JSON}" ]] && GENESIS_JSON="${PARENT}"/../files/shelley-genesis.json
-      epoch_length=$(jq -r .epochLength "${GENESIS_JSON}" 2>/dev/null)
-      if [[ ${epoch_slot} -ge $(( epoch_length / 10 )) ]]; then
-        if [[ "${last_actvstake_epoch}" != "${epoch}" ]]; then
-          log_err "Active Stake cache for epoch ${epoch} still not populated as of ${epoch_slot} slot, maximum tolerance was $(( epoch_length / 10 )) !!"
-          optexit
-        fi
-      else
-        if [[ $((last_snapshot_epoch + 2)) -lt ${epoch} ]]; then
-          [[ "${DEBUG_MODE}" == "1" ]] && echo "Last stake snapshot was captured in epoch: ${last_snapshot_epoch}."
-          log_err "Stake snapshot for current epoch ${epoch} was not captured !!"
-          optexit
-        fi
+    [[ -z "${GENESIS_JSON}" ]] && GENESIS_JSON="${PARENT}"/../files/shelley-genesis.json
+    epoch_length=$(jq -r .epochLength "${GENESIS_JSON}" 2>/dev/null)
+    if [[ ${epoch_slot} -ge $(( epoch_length / 6 )) ]]; then
+      if [[ ${last_actvstake_epoch} -lt ${epoch} ]]; then
+        log_err "Active Stake cache for epoch ${epoch} still not populated as of ${epoch_slot} slot, maximum tolerance was $(( epoch_length / 6 )) !!"
+        optexit
+      fi
     fi
   fi
 }
 
 function chk_limit() {
-  limit=$(curl -skL "${GURL}"/blocks -I | grep -i 'content-range' | sed -e 's#.*.-##' -e 's#/.*.##' 2>/dev/null)
+  limit=$(curl -skL "${URLRPC}"/blocks -I | grep -i 'content-range' | sed -e 's#.*.-##' -e 's#/.*.##' 2>/dev/null)
   if [[ "${limit}" != "999" ]]; then
     log_err "The PostgREST config for uses a custom limit that does not match monitoring instances"
     optexit
@@ -180,8 +169,7 @@ function chk_endpt_get() {
   [[ "${2}" != "rpc" ]] && urlendpt="${GURL}/${endpt}" || urlendpt="${URLRPC}/${endpt}"
   getrslt=$(curl -sfkL "${urlendpt}" -H "Range: 0-1" 2>/dev/null)
   if [[ -z "${getrslt}" ]] || [[ "${getrslt}" == "[]" ]]; then
-    [[ "${DEBUG_MODE}" == "1" ]] && echo "Response received for ${urlendpt} : $(curl -skL "${urlendpt}" -H "Range: 0-1" -I)"
-    log_err "Could not fetch from endpoint ${urlendpt} !!"
+    log_err "Could not fetch from endpoint ${urlendpt}, response received : $(curl -skL "${urlendpt}" -H "Range: 0-1" -I) !!"
     optexit
   fi
 }
@@ -189,27 +177,39 @@ function chk_endpt_get() {
 function chk_endpt_post() {
   local endpt="${1}"
   local data="${2}"
-  echo rslt="$(curl -sL -X POST -H "Content-Type: application/json" "${GURL}/${endpt}" -d "${data}" 2>&1)"
+  echo rslt="$(curl -skL -X POST -H "Content-Type: application/json" "${URLRPC}/${endpt}" -d "${data}" 2>&1)"
+}
+
+function chk_asset_registry() {
+  ct=$(curl -sfkL -H 'Prefer: count=exact' "${URLRPC}/asset_token_registry?select=asset_name&limit=1" -I 2>/dev/null | grep -i "content-range" | cut -d/ -f2 | tr -d '[:space:]')
+  if [[ "${ct}" == "" ]] || [[ $ct -lt 150 ]]; then
+    log_err "Asset registry cache seems incomplete (<150) assets, try deleting key: asset_registry_commit in control_table and wait for next cron run"
+    optexit
+  fi
 }
 
 ##################
 # Main Execution #
 ##################
 
-if [[ $# -lt 4 ]]; then
-  usage
-elif [[ "$5" == "-d" ]]; then
+PARENT="$(dirname "${0}")"
+
+if [[ "$3" == "-d" || "$5" == "-d" ]]; then
   export DEBUG_MODE=1
   echo "Debug Mode enabled!"
 fi
-PARENT="$(dirname "${0}")"
+if [[ $# = 2 ]] || [[ $# = 3 ]]; then
+  set_defaults "$1" "$2"
+elif [[ $# -gt 3 ]]; then
+  set_defaults
+else
+  usage
+fi
 
-set_defaults "$3" "$4"
 chk_upd
-
-#chk_is_up # Part of PostgREST 9.0.1 , but requires seperate admin port
 chk_version
 chk_rpcs
 chk_tip
 chk_cache_status
 chk_limit
+chk_asset_registry
